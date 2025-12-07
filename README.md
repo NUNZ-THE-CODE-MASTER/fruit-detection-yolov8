@@ -47,7 +47,7 @@ December 12, 2025 at 6:00 PM (Mauritius time)
 
 ## Repository Structure
 ```
-fruit-sorting-robot/
+fruit-detection-yolov8/
 ├── src/              # Main code
 ├── models/           # Trained model (best.pt)
 ├── config/           # Configuration files
