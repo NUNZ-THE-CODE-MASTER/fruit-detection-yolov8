@@ -1,0 +1,7 @@
+Banana
+Grapes
+Mango
+Orange
+Apples
+Kiwi
+mixedfruit
