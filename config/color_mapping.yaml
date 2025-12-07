@@ -1,0 +1,22 @@
+fruit_colors:
+  Banana: yellow
+  Grapes: green
+  Mango: green
+  Orange: orange
+  Apples: red
+  Kiwi: green
+  mixedfruit: red, yellow, green, blue
+
+color_bins:
+  red: 0
+  yellow: 1
+  green: 2
+  blue: 3
+
+bin_positions:
+  0: [150, 0, 50]
+  1: [0, 150, 50]
+  2: [-150, 0, 50]
+  3: [0, -150, 50]
+
+detection_position: [0, 100, 80]
