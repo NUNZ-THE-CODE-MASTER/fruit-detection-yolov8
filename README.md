@@ -1,2 +1,2 @@
-# fruit-detection-yolov8
+# fruit-detection-robot
 Real-time fruit classification using YOLOv8 on Raspberry Pi
