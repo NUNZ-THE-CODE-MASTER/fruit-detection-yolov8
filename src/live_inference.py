@@ -3,8 +3,8 @@ from ultralytics import YOLO
 import cv2
 import os
 import time
-from src.arm_controller import ArmController
-from src.utils import load_config
+from arm_controller import ArmController
+from utils import load_config
 
 # Path to your trained YOLOv8 model
 MODEL_PATH = os.path.join("models", "best.pt")
