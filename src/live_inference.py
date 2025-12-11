@@ -1,171 +1,325 @@
-"""Live fruit detection with arm control integration."""
-from ultralytics import YOLO
-import cv2
-import os
-import time
-from arm_controller import ArmController
-from utils import load_config
-
-# Path to your trained YOLOv8 model
-MODEL_PATH = os.path.join("models", "best.pt")
-CONFIG_PATH = os.path.join("config", "color_mapping.yaml")
-
-def try_camera(index):
-    """Try to open a camera at a given index."""
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # DirectShow backend for Windows
-    if cap.isOpened():
-        ret, _ = cap.read()
-        if ret:
-            return True, cap
-    return False, None
-
-def detect_fruit_and_sort(frame, model, arm_controller, config):
-    """
-    Detect fruit in frame and sort using arm controller.
-    Returns detected fruit name if found, None otherwise.
-    """
-    # Run YOLO inference
-    results = model(frame, conf=0.5, verbose=False)
-    
-    detected_fruits = []
-    for result in results:
-        for box in result.boxes:
-            cls_id = int(box.cls[0])
-            conf = float(box.conf[0])
-            class_name = result.names[cls_id]
-            
-            detected_fruits.append({
-                'name': class_name,
-                'confidence': conf,
-                'bbox': box.xyxy[0].cpu().numpy()
-            })
-    
-    return detected_fruits
-
-def draw_detections(frame, detections):
-    """Draw detection boxes on frame."""
-    for det in detections:
-        x1, y1, x2, y2 = det['bbox'].astype(int)
-        label = f"{det['name']} ({det['confidence']:.2f})"
+import cv2 
+import tkinter as tk 
+from tkinter import Label, Button, Frame 
+from PIL import Image, ImageTk 
+from ultralytics import YOLO 
+import os 
+import threading 
+ 
+MODEL_PATH = os.path.join("models", "best.pt") 
+ 
+class FruitSorterUI: 
+    def __init__(self, root): 
+        self.root = root 
+        self.root.title("Smart Fruit Sorting System for Farmers") 
+        self.root.geometry("900x650") 
+        self.root.configure(bg="#081c15")
+ 
+        # Stats tracking
+        self.fruits_detected = 0
+        self.good_quality = 0
+        self.rejected = 0
+ 
+        # ========================= 
+        # HEADER SECTION 
+        # ========================= 
+        header_frame = Frame(root, bg="#1b4332", relief="flat", bd=0) 
+        header_frame.pack(pady=10, padx=15, fill="x") 
+ 
+        self.title_label = Label( 
+            header_frame, 
+            text="🌾 Smart Fruit Sorting System 🍎", 
+            font=("Arial", 22, "bold"), 
+            bg="#1b4332", 
+            fg="#b7e4c7",
+            pady=10
+        ) 
+        self.title_label.pack() 
         
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(frame, label, (x1, y1 - 10),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    
-    return frame
-
-def main_live_detection(use_arm=True, sorting_mode='fruit'):
-    """
-    Main function for live fruit detection with optional arm sorting.
-    
-    Args:
-        use_arm: Whether to control the arm (True) or just show detection (False)
-        sorting_mode: 'fruit' for fruit-type sorting, 'color' for color-based sorting
-    """
-    print("="*60)
-    print(f"LIVE FRUIT DETECTION - {sorting_mode.upper()} SORTING")
-    print("="*60)
-    print("Controls:")
-    print("  'q' - Quit")
-    print("  's' - Sort the detected fruit")
-    print("  'Space' - Process next detection")
-    print("="*60)
-
-    print("Trying to open cameras...")
-    success, cap = try_camera(1)
-    if not success:
-        print("Trying camera index 0...")
-        success, cap = try_camera(0)
-
-    if not success:
-        print("Error: Could not open any camera!")
-        return
-
-    print("Camera opened successfully!")
-
-    # Load YOLO model
-    print(f"Loading YOLO model from {MODEL_PATH}...")
-    model = YOLO(MODEL_PATH)
-    
-    # Load config
-    config = load_config(CONFIG_PATH)
-    
-    # Initialize arm controller if requested
-    arm_controller = None
-    if use_arm:
+        self.subtitle_label = Label(
+            header_frame,
+            text="AI-Powered Agricultural Technology",
+            font=("Arial", 10),
+            bg="#1b4332",
+            fg="#d8f3dc",
+            pady=3
+        )
+        self.subtitle_label.pack()
+ 
+        # ========================= 
+        # STATS BAR
+        # ========================= 
+        stats_frame = Frame(root, bg="#2d6a4f", relief="flat", bd=0)
+        stats_frame.pack(pady=8, padx=15, fill="x")
+        
+        stats_inner = Frame(stats_frame, bg="#2d6a4f")
+        stats_inner.pack(pady=8)
+        
+        # Create 4 stat boxes
+        self.stat_detected = self.create_stat_box(stats_inner, "0", "Detected", 0)
+        self.stat_good = self.create_stat_box(stats_inner, "0", "Good", 1)
+        self.stat_rejected = self.create_stat_box(stats_inner, "0", "Rejected", 2)
+        self.stat_efficiency = self.create_stat_box(stats_inner, "0%", "Efficiency", 3)
+ 
+        # ========================= 
+        # VIDEO DISPLAY 
+        # ========================= 
+        video_outer_frame = Frame(root, bg="#1b4332", relief="flat", bd=0)
+        video_outer_frame.pack(pady=8, padx=15)
+        
+        video_frame = Frame(video_outer_frame, bg="#1b4332") 
+        video_frame.pack(padx=10, pady=10)
+ 
+        self.video_label = Label( 
+            video_frame, 
+            bg="#000000", 
+            text="📹 Camera Ready",
+            fg="#95d5b2",
+            font=("Arial", 11),
+            width=85,
+            height=15,
+            justify="center"
+        ) 
+        self.video_label.pack() 
+ 
+        # ========================= 
+        # BUTTON SECTION 
+        # ========================= 
+        button_frame = Frame(root, bg="#081c15") 
+        button_frame.pack(pady=12) 
+ 
+        self.start_button = Button( 
+            button_frame, 
+            text="▶ START", 
+            font=("Arial", 14, "bold"), 
+            bg="#52b788", 
+            fg="white", 
+            padx=35, 
+            pady=11, 
+            command=self.start_detection_thread,
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            activebackground="#40916c",
+            activeforeground="white"
+        ) 
+        self.start_button.grid(row=0, column=0, padx=12) 
+ 
+        self.stop_button = Button( 
+            button_frame, 
+            text="⛔ STOP", 
+            font=("Arial", 14, "bold"), 
+            bg="#d62828", 
+            fg="white", 
+            padx=35, 
+            pady=11, 
+            command=self.stop_detection,
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            activebackground="#9d0208",
+            activeforeground="white"
+        ) 
+        self.stop_button.grid(row=0, column=1, padx=12) 
+ 
+        # ========================= 
+        # STATUS SECTION
+        # ========================= 
+        status_frame = Frame(root, bg="#1b4332", relief="flat", bd=0)
+        status_frame.pack(pady=8, padx=15, fill="x")
+        
+        status_inner = Frame(status_frame, bg="#1b4332")
+        status_inner.pack(pady=8)
+        
+        self.status_indicator = Label(
+            status_inner,
+            text="●",
+            font=("Arial", 14),
+            bg="#1b4332",
+            fg="#52b788"
+        )
+        self.status_indicator.pack(side="left", padx=4)
+        
+        self.status_label = Label(
+            status_inner,
+            text="System Ready",
+            font=("Arial", 12, "bold"),
+            bg="#1b4332",
+            fg="#d8f3dc"
+        )
+        self.status_label.pack(side="left")
+ 
+        # State 
+        self.cap = None 
+        self.running = False 
+        self.display_width = 680
+        self.display_height = 300
+        
+        # Auto-start camera feed on launch
+        self.start_camera_feed()
+        
+    def create_stat_box(self, parent, value, label, column):
+        """Helper to create stat display boxes"""
+        container = Frame(parent, bg="#2d6a4f")
+        container.grid(row=0, column=column, padx=14, pady=3)
+        
+        value_label = Label(
+            container,
+            text=value,
+            font=("Arial", 20, "bold"),
+            bg="#2d6a4f",
+            fg="#d8f3dc"
+        )
+        value_label.pack()
+        
+        text_label = Label(
+            container,
+            text=label,
+            font=("Arial", 10),
+            bg="#2d6a4f",
+            fg="#b7e4c7"
+        )
+        text_label.pack()
+        
+        return value_label
+ 
+    # ============================= 
+    # THREAD SAFE START 
+    # ============================= 
+    def start_detection_thread(self): 
+        if not self.running:
+            thread = threading.Thread(target=self.start_detection) 
+            thread.daemon = True 
+            thread.start() 
+ 
+    # ============================= 
+    # MAIN LIVE DETECTION LOOP 
+    # ============================= 
+    def start_detection(self): 
+        if self.running:
+            return  # Already running
+            
+        print("Starting AI detection...") 
+        self.status_label.config(text="Loading AI model...", fg="#ffc300")
+ 
+        print("Loading model:", MODEL_PATH) 
+        
         try:
-            arm_controller = ArmController(config)
-            print("Arm controller initialized!")
+            model = YOLO(MODEL_PATH)
+            self.status_label.config(text="✓ AI Detection Active", fg="#52b788")
         except Exception as e:
-            print(f"Warning: Could not initialize arm controller: {e}")
-            print("Continuing with detection only...")
-
-    # Set camera resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    time.sleep(2)  # Give camera time to warm up
-
-    print("Starting live detection...\n")
-
-    last_detections = []
-    paused = False
-
-    while True:
-        success, frame = cap.read()
-        if not success:
-            print("Failed to grab frame")
-            break
-
-        # Detect fruits
-        detections = detect_fruit_and_sort(frame, model, arm_controller, config)
-        
-        if not paused:
-            last_detections = detections
-
-        # Draw detections
-        annotated = draw_detections(frame.copy(), last_detections)
-        
-        # Add info text
-        info_text = f"Detections: {len(last_detections)} | Mode: {sorting_mode.upper()}"
-        cv2.putText(annotated, info_text, (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        
-        if paused:
-            cv2.putText(annotated, "PAUSED - Press SPACE to continue", (10, 70),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-        # Display
-        cv2.imshow(f"Live Fruit Detection [{sorting_mode}]", annotated)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            print("Quitting...")
-            break
-        elif key == ord('s') and len(last_detections) > 0:
-            # Sort the first detected fruit
-            fruit = last_detections[0]
-            print(f"\nSorting detected fruit: {fruit['name']}")
-            
-            if arm_controller:
-                if sorting_mode == 'fruit':
-                    arm_controller.sort_fruit_by_type(fruit['name'])
-                else:  # color mode
-                    # For color mode, pass the detected color
-                    arm_controller.sort_fruit_by_color(fruit['name'])
-            else:
-                print("Arm controller not available!")
+            print(f"Error loading model: {e}")
+            self.status_label.config(text="Model Error", fg="#d62828")
+            return
+ 
+        self.running = True 
+ 
+        while self.running: 
+            if self.cap is None or not self.cap.isOpened():
+                break
                 
-        elif key == ord(' '):
-            paused = not paused
-            status = "PAUSED" if paused else "RUNNING"
-            print(f"Detection {status}")
-
-    cap.release()
-    cv2.destroyAllWindows()
-    print("Detection stopped.")
-
+            ret, frame = self.cap.read() 
+            if not ret: 
+                continue 
+ 
+            # YOLO Detection 
+            results = model(frame) 
+            annotated_frame = results[0].plot() 
+            
+            # Update stats (example - adjust based on your classes)
+            detections = results[0].boxes
+            if len(detections) > 0:
+                self.fruits_detected = len(detections)
+                # Update stat displays
+                self.stat_detected.config(text=str(self.fruits_detected))
+ 
+            # Resize frame to fit display area while maintaining aspect ratio
+            h, w = annotated_frame.shape[:2]
+            aspect = w / h
+            
+            if aspect > (self.display_width / self.display_height):
+                new_w = self.display_width
+                new_h = int(new_w / aspect)
+            else:
+                new_h = self.display_height
+                new_w = int(new_h * aspect)
+            
+            resized_frame = cv2.resize(annotated_frame, (new_w, new_h))
+ 
+            # Convert BGR to RGB for Tkinter 
+            rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB) 
+            img = Image.fromarray(rgb) 
+            imgtk = ImageTk.PhotoImage(img) 
+ 
+            # Update the label with new frame
+            self.video_label.config(image=imgtk, text="", width=new_w, height=new_h) 
+            self.video_label.image = imgtk
+            
+            # Process Tkinter events to keep UI responsive
+            self.root.update()
+        
+        # When detection stops, resume normal camera feed
+        print("AI detection stopped.") 
+        self.status_label.config(text="Camera Active", fg="#52b788")
+ 
+    def stop_detection(self): 
+        print("Stopping detection...") 
+        self.running = False
+        
+    # =============================
+    # CAMERA FEED (Always On)
+    # =============================
+    def start_camera_feed(self):
+        """Start camera feed immediately when app launches"""
+        print("Initializing camera...")
+        self.cap = cv2.VideoCapture(0)
+        
+        if not self.cap.isOpened():
+            print("Error: Could not open camera.")
+            self.status_label.config(text="Camera Error", fg="#d62828")
+            self.video_label.config(text="❌ Camera Not Found", fg="#d62828")
+            return
+        
+        self.status_label.config(text="Camera Active", fg="#52b788")
+        self.update_camera_feed()
+    
+    def update_camera_feed(self):
+        """Update camera feed continuously"""
+        if self.cap is None or not self.cap.isOpened():
+            return
+            
+        ret, frame = self.cap.read()
+        
+        if ret:
+            # Resize frame
+            h, w = frame.shape[:2]
+            aspect = w / h
+            
+            if aspect > (self.display_width / self.display_height):
+                new_w = self.display_width
+                new_h = int(new_w / aspect)
+            else:
+                new_h = self.display_height
+                new_w = int(new_h * aspect)
+            
+            resized_frame = cv2.resize(frame, (new_w, new_h))
+            
+            # Convert to RGB for Tkinter
+            rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(rgb)
+            imgtk = ImageTk.PhotoImage(img)
+            
+            # Update label
+            self.video_label.config(image=imgtk, text="", width=new_w, height=new_h)
+            self.video_label.image = imgtk
+        
+        # Schedule next update (approximately 30 FPS)
+        if self.cap is not None:
+            self.root.after(33, self.update_camera_feed)
+ 
+ 
+# Run UI 
 if __name__ == "__main__":
-    # Run with arm control in fruit-type sorting mode
-    main_live_detection(use_arm=True, sorting_mode='fruit')
-
+    root = tk.Tk() 
+    app = FruitSorterUI(root) 
+    root.mainloop()
